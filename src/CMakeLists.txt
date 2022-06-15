@@ -587,7 +587,9 @@ if (${CMAKE_SYSTEM_NAME} MATCHES FreeBSD OR ${CMAKE_SYSTEM_NAME} MATCHES NetBSD 
 endif ()
 
 if (WIN32)
-  set(CMAKE_EXE_LINKER_FLAGS -Wl,--export-all-symbols)
+  # set(CMAKE_EXE_LINKER_FLAGS -Wl,--export-all-symbols)
+  set(CMAKE_EXE_LINKER_FLAGS -Wl)
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS 1)
   set(WIN32_LIBS imagehlp dbghelp)
 endif(WIN32)
 
