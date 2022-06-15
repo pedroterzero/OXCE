@@ -183,6 +183,8 @@ if ( BUILD_PACKAGE )
     set ( CPACK_DMG_VOLUME_NAME "OpenXcom Extended" )
     set ( CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_SOURCE_DIR}/res/openxcom_block.png" )
     set ( CPACK_GENERATOR "DragNDrop")
+    # 2022-06-15 - pedroterzero - override bindir so we can build install on macos on github
+    set ( OVERRIDE_INSTALL_BINDIR "bin")
   else()
     set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt" )
   endif()

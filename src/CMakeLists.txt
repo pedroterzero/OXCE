@@ -557,6 +557,10 @@ endif ()
 
 if (( APPLE AND CREATE_BUNDLE ) OR CPACK_GENERATOR STREQUAL "7Z" )
   set ( CMAKE_INSTALL_BINDIR "." )
+  # 2022-06-15 - pedroterzero - allow override of bindir otherwise we can't build install on macos on github
+  if (( OVERRIDE_INSTALL_BINDIR ))
+    set ( CMAKE_INSTALL_BINDIR "${OVERRIDE_INSTALL_BINDIR}" )
+  endif ()
 endif ()
 
 add_executable ( openxcom  ${application_type} ${openxcom_src} ${openxcom_icon} )
