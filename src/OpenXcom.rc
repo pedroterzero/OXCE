@@ -7,7 +7,7 @@
 // Manifest
 //
 
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "../res/windows/openxcom.manifest"
+// CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "../res/windows/openxcom.manifest"
 
 /////////////////////////////////////////////////////////////////////////////
 //
