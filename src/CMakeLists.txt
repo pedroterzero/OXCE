@@ -589,8 +589,8 @@ endif ()
 if (WIN32)
   # set(CMAKE_EXE_LINKER_FLAGS -Wl,--export-all-symbols)
   set(CMAKE_EXE_LINKER_FLAGS -Wl)
-  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS 1)
-  set(WIN32_LIBS imagehlp dbghelp)
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  set(WIN32_LIBS imagehlp dbghelp
 endif(WIN32)
 
 target_link_libraries ( openxcom ${system_libs} ${PKG_DEPS_LDFLAGS} ${WIN32_LIBS} )
