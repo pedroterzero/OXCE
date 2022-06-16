@@ -35,7 +35,7 @@ jobs:
             packages: ccache
             compiler: clang
             cpp-compiler: clang++
-            cmake-args: -A Win32
+            # cmake-args: -A Win32
             # build-args: "/clp:NoSummary"
 
           - name: macOS
