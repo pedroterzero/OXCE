@@ -2,7 +2,30 @@
 # also change .travis.yml accordingly.
 name: ci
 
+# need to explicitly enable this here, otherwise even though it's correctly configured in github, it won't work
+permissions:
+  packages: write
+
 on: [push, pull_request]
+
+env:
+  # attempt to build it ourselves, if we can't access it
+  MXE_IMAGE_FALLBACK_NAME: ghcr.io/${{ github.actor }}/mxe
+  MXE_IMAGE_NAME: ghcr.io/pedroterzero/mxe
+  MXE_IMAGE_VERSION: 0.0.1
+  MXE_DOCKERFILE: |
+    FROM alpine AS build
+    RUN apk add --no-cache autoconf automake bash binutils bison bzip2 flex g++ gdk-pixbuf gettext git gperf \
+        intltool libtool linux-headers lzip make openssl openssl-dev p7zip patch perl python3 py3-mako ruby \
+        unzip wget xz zlib
+    RUN cd /opt && git clone https://github.com/mxe/mxe.git
+    RUN ln -s /usr/bin/python3 /usr/bin/python
+    RUN cd /opt/mxe && make MXE_PLUGIN_DIRS=plugins/gcc8 MXE_TARGETS=x86_64-w64-mingw32.static JOBS=8 gcc cmake sdl sdl_gfx sdl_mixer sdl_image yaml-cpp zlib
+
+    FROM alpine
+    COPY --from=build /opt/mxe/usr /opt/mxe/usr
+    COPY --from=build /opt/mxe/.ccache /opt/mxe/.ccache
+    RUN apk add --no-cache bash grep libstdc++ make
 
 jobs:
   build:
@@ -12,49 +35,97 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux
-            os: ubuntu-20.04  # -latest is still stuck at 18.04
-            compiler: gcc
-            cpp-compiler: g++
+          # - name: Linux
+          #   os: ubuntu-20.04  # -latest is still stuck at 18.04
+          #   compiler: gcc
+          #   cpp-compiler: g++
+
+          # - name: Linux
+          #   os: ubuntu-20.04  # -latest is still stuck at 18.04
+          #   compiler: clang
+          #   cpp-compiler: clang++
 
           - name: Linux
             os: ubuntu-20.04  # -latest is still stuck at 18.04
-            compiler: clang
-            cpp-compiler: clang++
+            compiler: mingw
+            cpp-compiler: mingw
 
-          - name: Windows
-            os: windows-latest
-            packages: ccache
-            compiler: cl
-            cpp-compiler: cl
-            cmake-args: -A Win32
-            build-args: "/clp:NoSummary"
+          # - name: Windows
+          #   os: windows-latest
+          #   packages: ccache
+          #   compiler: cl
+          #   cpp-compiler: cl
+          #   cmake-args: -A Win32
+          #   build-args: "/clp:NoSummary"
 
-          - name: Windows-clang
-            os: windows-latest
-            packages: ccache
-            compiler: clang
-            cpp-compiler: clang++
-            # cmake-args: -A Win32
-            # build-args: "/clp:NoSummary"
-
-          - name: macOS
-            os: macOS-latest
-            packages: yaml-cpp sdl sdl_gfx sdl_image sdl_mixer
-            # cmake-args: -DCMAKE_BINARY_DIR=/usr/local/bin
-            compiler: clang
-            cpp-compiler: clang++
-            app-bundle: openxcom.app  # all other builds default to bin/
+          # - name: macOS
+          #   os: macOS-latest
+          #   packages: yaml-cpp sdl sdl_gfx sdl_image sdl_mixer
+          #   # cmake-args: -DCMAKE_BINARY_DIR=/usr/local/bin
+          #   compiler: clang
+          #   cpp-compiler: clang++
+          #   app-bundle: openxcom.app  # all other builds default to bin/
 
     runs-on: ${{ matrix.os }}
 
     steps:
+      # - uses: actions/checkout@v3
+
+      - name: Login to GitHub Container Registry
+        if: matrix.compiler == 'mingw'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check mxe container
+        id: check-mxe-container
+        continue-on-error: true
+        if: matrix.compiler == 'mingw'
+        run: |
+          if docker pull ${MXE_IMAGE_NAME}:${MXE_IMAGE_VERSION}; then
+            echo ::set-output name=exit_code::$?
+          elif docker pull ${MXE_IMAGE_FALLBACK_NAME}:${MXE_IMAGE_VERSION}; then
+            echo "MXE_IMAGE_NAME=${MXE_IMAGE_FALLBACK_NAME}" >> $GITHUB_ENV
+            echo ::set-output name=exit_code::$?
+          else
+            echo ::set-output name=exit_code::$?
+          fi
+
+      - name: Build mxe container
+        if: matrix.compiler == 'mingw' && steps.check-mxe-container.outputs.exit_code != 0
+        # if: steps.check-mxe-container.outputs.exit_code != 0
+        run: |
+          echo "$MXE_DOCKERFILE" > Dockerfile
+          docker build . -t ${MXE_IMAGE_NAME}:${MXE_IMAGE_VERSION}
+          docker push ${MXE_IMAGE_NAME}:${MXE_IMAGE_VERSION}
+
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
+      #   with:
+      #     limit-access-to-actor: true
+
       - name: Install packages (Ubuntu)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.compiler != 'mingw'
         run: |
           sudo apt-get update
           sudo apt-get -yq --no-install-suggests --no-install-recommends install ccache ${{ matrix.packages }}
           sudo apt-get -yq --no-install-suggests --no-install-recommends install libsdl1.2-dev libsdl-mixer1.2-dev libsdl-image1.2-dev libsdl-gfx1.2-dev libyaml-cpp-dev
+
+      # - name: Install packages (Ubuntu/mingw)
+      #   if: matrix.compiler == 'mingw'
+      #   run: |
+      #     sudo apt-get update
+      #     # sudo apt-get install autoconf automake autopoint bash bison bzip2 flex g++ g++-multilib gettext git gperf intltool \
+      #     #  libc6-dev-i386 libgdk-pixbuf2.0-dev libltdl-dev libssl-dev libtool-bin libxml-parser-perl lzip make openssl \
+      #     #  p7zip-full patch perl python3 python3-mako ruby sed unzip wget xz-utils
+      #     sudo apt-get install autopoint gperf intltool libtool-bin lzip python3-mako
+      #     cd /opt
+      #     sudo git clone https://github.com/mxe/mxe.git
+      #     sudo chown -R $(whoami): mxe
+      #     cd /opt/mxe
+      #     make MXE_PLUGIN_DIRS=plugins/gcc8 MXE_TARGETS=x86_64-w64-mingw32.static JOBS=8 gcc cmake sdl sdl_gfx sdl_mixer sdl_image yaml-cpp zlib
 
       - name: Install packages (Windows)
         if: runner.os == 'Windows' && matrix.packages
@@ -86,22 +157,75 @@ jobs:
             echo "MAYBE_SUDO=sudo" >> $GITHUB_ENV
           fi
           echo "CMAKE_BUILD_PARALLEL_LEVEL=`getconf _NPROCESSORS_ONLN 2>/dev/null || getconf NPROCESSORS_ONLN 2>/dev/null || echo 2`" >> $GITHUB_ENV
+
       - name: Download dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           Invoke-WebRequest -Uri "https://openxcom.org/download/dev/openxcom-deps-win-vc2017.zip" -OutFile "openxcom-deps-win-vc2017-newest.zip"
           Expand-Archive -Path "openxcom-deps-win-vc2017-newest.zip" -DestinationPath "."
 
+      # - name: Download dependencies (mingw)
+      #   if: matrix.compiler == 'mingw'
+      #   run: |
+      #     wget -q "https://openxcom.org/download/dev/openxcom-deps-win-vc2017.zip"
+      #     unzip openxcom-deps-win-vc2017.zip
+
       - name: Generate project files
+        if: matrix.compiler != 'mingw'
         run: |
+          echo "CMAKE=$(which cmake)" >> $GITHUB_ENV
           cmake -B ${{ matrix.build-dir || 'build' }} ${{ matrix.build-src-dir || '.' }} -DCMAKE_BUILD_TYPE=Release -DENABLE_WARNING=1 -DCHECK_CCACHE=1 ${{ matrix.cmake-args }}
         env:
           CC: ${{ matrix.compiler }}
           CXX: ${{ matrix.cpp-compiler }}
 
+      # - name: Generate project files (mingw)
+      #   if: matrix.compiler == 'mingw'
+      #   # https://openxcom.org/forum/index.php/topic,7048.msg111478.html#msg111478
+      #   run: |
+      #     GITISODATE=$(git show -s --format=%ci)
+      #     GITDATE=$(date -d"$GITISODATE" +%Y-%m-%d)
+      #     GITREF=$(git show -s --format=%h)
+      #     OSARCH=win64
+      #     SHORTVERSION=$(/bin/echo -e "#include \"src/version.h\"\nOPENXCOM_FTA_VERSION_SHORT" | cpp | egrep -v '^(#.+|[[:space:]]+$)' | cut -d\" -f 2 | sed -e "s, ,-,g")
+      #     ZNAME="$SHORTVERSION-$GITREF-$GITDATE-$OSARCH.7z"
+      #     export PATH=/opt/mxe/usr/bin:$PATH
+
+      #     TOOLCHAIN=/opt/mxe/usr/bin/x86_64-w64-mingw32.static
+
+      #     echo "CMAKE=$TOOLCHAIN-cmake" >> $GITHUB_ENV
+
+      #     mkdir build
+      #     cd build
+      #     ${TOOLCHAIN}-cmake \
+      #       -DCMAKE_BUILD_TYPE=Release -DDEV_BUILD=OFF -DBUILD_PACKAGE=OFF ..
+
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
+      #   with:
+      #     limit-access-to-actor: true
+
       - name: Compile source code
+        if: matrix.compiler != 'mingw'
         run: |
-          cmake --build ${{ matrix.build-dir || 'build' }} -v --config ${{ matrix.build-config || 'Release' }} -- ${{ matrix.build-args }}
+          $CMAKE --build ${{ matrix.build-dir || 'build' }} -v --config ${{ matrix.build-config || 'Release' }} -- ${{ matrix.build-args }}
+
+      - name: Compile source code (mingw)
+        if: matrix.compiler == 'mingw'
+        continue-on-error: true
+        run: |
+          mkdir build
+          docker run -v "$PWD":/app -v "$HOME/.ccache:/root/.ccache" -w /app --rm ${MXE_IMAGE_NAME}:${MXE_IMAGE_VERSION} sh -c "\
+            export PATH=/opt/mxe/usr/bin:\$PATH && cd build && /opt/mxe/usr/bin/x86_64-w64-mingw32.static-cmake -DCMAKE_BUILD_TYPE=Release -DDEV_BUILD=OFF -DBUILD_PACKAGE=OFF .. && \
+            make -j4 \
+          "
+
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
+        timeout-minutes: 10
+        with:
+          limit-access-to-actor: true
+
 
 #      - name: Fix install path
 #        if: runner.os == 'macOS'
