@@ -25,7 +25,7 @@ env:
     FROM alpine
     COPY --from=build /opt/mxe/usr /opt/mxe/usr
     COPY --from=build /opt/mxe/.ccache /opt/mxe/.ccache
-    RUN apk add --no-cache bash grep libstdc++ make
+    RUN apk add --no-cache bash ccache grep libstdc++ make
 
 jobs:
   build:
@@ -216,7 +216,7 @@ jobs:
         run: |
           mkdir build
           docker run -v "$PWD":/app -v "$HOME/.ccache:/root/.ccache" -w /app --rm ${MXE_IMAGE_NAME}:${MXE_IMAGE_VERSION} sh -c "\
-            export PATH=/opt/mxe/usr/bin:\$PATH && cd build && /opt/mxe/usr/bin/x86_64-w64-mingw32.static-cmake -DCMAKE_BUILD_TYPE=Release -DDEV_BUILD=OFF -DBUILD_PACKAGE=OFF .. && \
+            export PATH=/opt/mxe/usr/bin:\$PATH && cd build && /opt/mxe/usr/bin/x86_64-w64-mingw32.static-cmake -DCMAKE_BUILD_TYPE=Release -DDEV_BUILD=OFF -DBUILD_PACKAGE=OFF -DCHECK_CCACHE=1 .. && \
             make -j4 \
           "
 
