@@ -343,10 +343,10 @@ PathfindingStep Pathfinding::getTUCost(Position startPosition, int direction, co
 		}
 	}
 
-	bool triedStairs = (maskOfPartsGoingUp != 0 && ((maskOfPartsGoingUp | maskOfPartsHoleUp) == maskArmor));
-	bool triedStairsDown = (maskOfPartsGround == 0 && ((maskOfPartsGoingDown | maskOfPartsFalling) == maskArmor));
-	bool fallingDown = (maskOfPartsFalling == maskArmor);
-	bool flying =  (maskOfPartsFlying == maskArmor);
+	const bool triedStairs = (maskOfPartsGoingUp != 0 && ((maskOfPartsGoingUp | maskOfPartsHoleUp) == maskArmor));
+	const bool triedStairsDown = (maskOfPartsGround == 0 && ((maskOfPartsGoingDown | maskOfPartsFalling) == maskArmor));
+	const bool fallingDown = (maskOfPartsFalling == maskArmor);
+	const bool flying =  (maskOfPartsFlying == maskArmor);
 
 	if (movementType != MT_FLY && fallingDown)
 	{
@@ -399,8 +399,10 @@ PathfindingStep Pathfinding::getTUCost(Position startPosition, int direction, co
 		}
 	}
 
+
 	// calculate cost and some final checks
 	auto totalCost = 0;
+
 	for (int i = 0; i < numberOfParts; ++i)
 	{
 		auto cost = 0;
@@ -632,7 +634,7 @@ PathfindingStep Pathfinding::getTUCost(Position startPosition, int direction, co
 		assert(false && "Unreachable code in pathfinding cost");
 	}
 
-	const auto timeCost = (cost.TimePercent + (costDiv / 2)) / costDiv;
+	const auto timeCost = (cost.TimePercent - 1 + (costDiv / 2)) / costDiv;
 	const auto energyCost = cost.EnergyPercent / costDiv;
 
 	return { { Clamp(timeCost, 1, INVALID_MOVE_COST - 1), Clamp(energyCost, 0, INVALID_MOVE_COST) }, { firePenaltyCost, 0 }, pos };
@@ -770,12 +772,12 @@ bool Pathfinding::isBlocked(const BattleUnit *unit, const Tile *tile, const int 
 				if (u != 0 && u != unit)
 				{
 					// don't let large units fall on other units
-					if (unit && unit->getArmor()->getSize() > 1)
+					if (unit && unit->isBigUnit())
 					{
 						return true;
 					}
 					// don't let any units fall on large units
-					if (u != unit && u != missileTarget && !u->isOut() && u->getArmor()->getSize() > 1)
+					if (u != unit && u != missileTarget && !u->isOut() && u->isBigUnit())
 					{
 						return true;
 					}
@@ -1120,9 +1122,9 @@ void Pathfinding::refreshPath()
 		_save->getBattleGame()->setTUReserved(BA_AUTOSHOT);
 	}
 
-	const bool running = _ctrlUsed && _unit->getArmor()->allowsRunning(_unit->getArmor()->getSize() == 1) && _path.size() > 1;
-	const bool strafing = _ctrlUsed && _unit->getArmor()->allowsStrafing(_unit->getArmor()->getSize() == 1) && _path.size() == 1;
-	const bool sneaking = _altUsed && _unit->getArmor()->allowsSneaking(_unit->getArmor()->getSize() == 1);
+	const bool running = _ctrlUsed && _unit->getArmor()->allowsRunning(_unit->isSmallUnit()) && _path.size() > 1;
+	const bool strafing = _ctrlUsed && _unit->getArmor()->allowsStrafing(_unit->isSmallUnit()) && _path.size() == 1;
+	const bool sneaking = _altUsed && _unit->getArmor()->allowsSneaking(_unit->isSmallUnit());
 
 	const auto bam = strafing ? BAM_STRAFE : running ? BAM_RUN : sneaking ? BAM_SNEAK : BAM_NORMAL;
 	const auto movementType = getMovementType(_unit, nullptr, bam); //preview always for unit not missiles

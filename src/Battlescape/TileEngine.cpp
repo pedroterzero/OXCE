@@ -249,6 +249,97 @@ MapSubset mapAreaExpand(MapSubset gs, int radius)
 	return { std::make_pair(gs.beg_x - radius, gs.end_x + radius), std::make_pair(gs.beg_y - radius, gs.end_y + radius) };
 }
 
+
+
+constexpr static Uint32 MaskBlockDirMul = 9;
+constexpr static Uint32 MaskBlockDirOffset = MaskBlockDirMul + 1;
+
+/**
+ * Calculate byte mask that is used to access cached data.
+ * @param dir Direction for 0 to 7 or -1 as no direction when we check direct up or down direction.
+ * @param z Value +1 as up, -1 as down, 0 as same level
+ * @return Mask corresponding given direction and level.
+ */
+constexpr static Uint32 selectBit(int dir, int z)
+{
+	return 1u << (MaskBlockDirOffset + MaskBlockDirMul * z + dir);
+}
+
+constexpr static Uint32 MaskBlockDown = selectBit(-1, -1);
+constexpr static Uint32 MaskBlockUp = selectBit(-1, +1);
+
+constexpr static Uint32 MaskFire = selectBit(+7, +1) << 1;
+constexpr static Uint32 MaskSmoke =  selectBit(+7, +1) << 2;
+
+
+
+template<typename T>
+bool getBlockDir(const T& td, int dir, int z)
+{
+	return td.blockDir & selectBit(dir, z);
+}
+template<typename T>
+void addBlockDir(T& td, int dir, int z, bool p)
+{
+	td.blockDir |= p * selectBit(dir, z);
+}
+
+template<typename T>
+bool getBlockUp(const T& td)
+{
+	return td.blockDir & MaskBlockUp;
+}
+template<typename T>
+void addBlockUp(T& td, bool p)
+{
+	td.blockDir |= p * MaskBlockUp;
+}
+
+template<typename T>
+bool getBlockDown(const T& td)
+{
+	return td.blockDir & MaskBlockDown;
+}
+template<typename T>
+void addBlockDown(T& td,bool p)
+{
+	td.blockDir |= p * MaskBlockDown;
+}
+
+template<typename T>
+bool getFire(const T& td)
+{
+	return td.blockDir & MaskFire;
+}
+template<typename T>
+void addFire(T& td, bool p)
+{
+	td.blockDir |= p * MaskFire;
+}
+
+template<typename T>
+bool getSmoke(const T& td)
+{
+	return td.blockDir & MaskSmoke;
+}
+template<typename T>
+void addSmoke(T& td, bool p)
+{
+	td.blockDir |= p * MaskSmoke;
+}
+
+template<typename T>
+bool getBigWallDir(const T& td, int dir)
+{
+	return td.bigWall & (1u << dir);
+}
+template<typename T>
+void addBigWallDir(T& td, int dir, bool p)
+{
+	td.bigWall |= p * (1u << dir);
+}
+
+
 } // namespace
 
 constexpr int TileEngine::heightFromCenter[11];
@@ -478,10 +569,10 @@ void TileEngine::calculateLighting(LightLayers layer, Position position, int eve
 						cache.height = 24;
 					}
 				}
-				cache.smoke = (tile->getSmoke() > 0);
-				cache.fire = (tile->getFire() > 0);
-				cache.blockUp = (verticalBlockage(tile, _save->getAboveTile(tile), DT_NONE) > 127);
-				cache.blockDown = (verticalBlockage(tile, _save->getBelowTile(tile), DT_NONE) > 127);
+				addSmoke(cache, tile->getSmoke() > 0);
+				addFire(cache, tile->getFire() > 0);
+				addBlockUp(cache, verticalBlockage(tile, _save->getAboveTile(tile), DT_NONE) > 127);
+				addBlockDown(cache, verticalBlockage(tile, _save->getBelowTile(tile), DT_NONE) > 127);
 				for (int dir = 0; dir < 8; ++dir)
 				{
 					Position pos = {};
@@ -490,28 +581,16 @@ void TileEngine::calculateLighting(LightLayers layer, Position position, int eve
 					auto result = 0;
 
 					result = horizontalBlockage(tile, tileNext, DT_NONE, true);
-					if (result == -1)
-					{
-						cache.bigWall |= (1 << dir);
-					}
+					addBigWallDir(cache, dir, (result == -1));
 
 					result = horizontalBlockage(tile, tileNext, DT_NONE);
-					if (result > 127 || result == -1)
-					{
-						cache.blockDir |= (1 << dir);
-					}
+					addBlockDir(cache, dir, 0, (result > 127 || result == -1));
 
 					tileNext = _save->getTile(currPos + pos + Position{ 0, 0, 1 });
-					if (verticalBlockage(tile, tileNext, DT_NONE) > 127)
-					{
-						cache.blockDirUp |= (1 << dir);
-					}
+					addBlockDir(cache, dir, 1, verticalBlockage(tile, tileNext, DT_NONE) > 127);
 
 					tileNext = _save->getTile(currPos + pos + Position{ 0, 0, -1 });
-					if (verticalBlockage(tile, tileNext, DT_NONE) > 127)
-					{
-						cache.blockDirDown |= (1 << dir);
-					}
+					addBlockDir(cache, dir, -1, verticalBlockage(tile, tileNext, DT_NONE) > 127);
 				}
 			}
 		);
@@ -551,7 +630,7 @@ void TileEngine::calculateLighting(LightLayers layer, Position position, int eve
  * @param layer Light is separated in 4 layers: Ambient, Tiles, Items, Units.
  */
 void TileEngine::addLight(MapSubset gs, Position center, int power, LightLayers layer)
-	{
+{
 	if (power <= 0)
 	{
 		return;
@@ -568,7 +647,7 @@ void TileEngine::addLight(MapSubset gs, Position center, int power, LightLayers 
 	const auto offsetTarget = (accuracy / 2 + Position(-1, -1, 0));
 	const auto clasicLighting = !(getEnhancedLighting() & ((fire ? 1 : 0) | (items ? 2 : 0) | (units ? 4 : 0)));
 	const auto topTargetVoxel = static_cast<Sint16>(_save->getMapSizeZ() * accuracy.z - 1);
-	const auto topCenterVoxel = static_cast<Sint16>((_blockVisibility[_save->getTileIndex(center)].blockUp ? (center.z + 1) : _save->getMapSizeZ()) * accuracy.z - 1);
+	const auto topCenterVoxel = static_cast<Sint16>((getBlockUp(_blockVisibility[_save->getTileIndex(center)]) ? (center.z + 1) : _save->getMapSizeZ()) * accuracy.z - 1);
 	const auto maxFirePower = std::min(15, getMaxStaticLightDistance() - 1);
 
 	iterateTiles(
@@ -578,7 +657,7 @@ void TileEngine::addLight(MapSubset gs, Position center, int power, LightLayers 
 		{
 			const auto target = tile->getPosition();
 			const auto diff = target - center;
-			const auto distance = (int)Round(Position::distance(target, center));
+			const auto distance = (int)Round(Position::distance(target.toVoxel(), center.toVoxel()) / Position::TileXY);
 			const auto targetLight = tile->getLightMulti(layer);
 			auto currLight = power - distance;
 
@@ -617,7 +696,7 @@ void TileEngine::addLight(MapSubset gs, Position center, int power, LightLayers 
 
 			auto calculateBlock = [&](Position point, Position &lastPoint, int &light, int &steps)
 			{
-				auto height = (point.z % accuracy.z) * divide;
+				const auto height = (point.z % accuracy.z) * divide;
 				point = point / accuracy;
 				if (light <= 0)
 				{
@@ -627,52 +706,27 @@ void TileEngine::addLight(MapSubset gs, Position center, int power, LightLayers 
 				{
 					return false;
 				}
-				auto dir = -1;
-				auto difference = point - lastPoint;
-				auto result = false;
-				auto& cache = _blockVisibility[_save->getTileIndex(lastPoint)];
-				Pathfinding::vectorToDirection(difference, dir);
-				if (difference.z > 0)
-				{
-					if (dir != -1)
-					{
-						result = cache.blockDirUp & (1 << dir);
-					}
-					else
-					{
-						result = cache.blockUp;
-					}
-				}
-				else if (difference.z == 0)
-				{
-					result = cache.blockDir & (1 << dir);
 
-					if (result && cache.bigWall & (1 << dir))
-					{
-						if (point == target)
-						{
-							result = false;
-						}
-					}
-				}
-				else if (difference.z < 0)
+				const auto difference = point - lastPoint;
+				const auto dir = Pathfinding::vectorToDirection(difference);
+				const auto& cache = _blockVisibility[_save->getTileIndex(lastPoint)];
+
+				auto result = getBlockDir(cache, dir, difference.z);
+				if (result && difference.z == 0 && getBigWallDir(cache, dir))
 				{
-					if (dir != -1)
+					if (point == target)
 					{
-						result = cache.blockDirDown & (1 << dir);
-					}
-					else
-					{
-						result = cache.blockDown;
+						result = false;
 					}
 				}
+
 				if (steps > 1)
 				{
-					if (cache.fire && fire && light <= maxFirePower) //some tile on path have fire, skip further calculation because destination tile should be lighted by this fire.
+					if (getFire(cache) && fire && light <= maxFirePower) //some tile on path have fire, skip further calculation because destination tile should be lighted by this fire.
 					{
 						result = true;
 					}
-					else if (cache.smoke)
+					else if (getSmoke(cache))
 					{
 						light -= 1;
 					}
@@ -1014,21 +1068,24 @@ bool TileEngine::calculateFOV(BattleUnit *unit, bool doTileRecalc, bool doUnitRe
  */
 Position TileEngine::getSightOriginVoxel(BattleUnit *currentUnit)
 {
+	const auto pos = currentUnit->getPosition();
+	auto* tile = currentUnit->getTile();
+
 	// determine the origin and target voxels for the raytrace
 	Position originVoxel;
-	originVoxel = Position((currentUnit->getPosition().x * 16) + 7, (currentUnit->getPosition().y * 16) + 8, currentUnit->getPosition().z*24);
-	originVoxel.z += -_save->getTile(currentUnit->getPosition())->getTerrainLevel();
+	originVoxel = pos.toVoxel() + Position(7, 8, 0); // Why is it x+7??
+	originVoxel.z += -tile->getTerrainLevel();
 	originVoxel.z += currentUnit->getHeight() + currentUnit->getFloatHeight() - 1; //one voxel lower (eye level)
-	Tile *tileAbove = _save->getTile(currentUnit->getPosition() + Position(0,0,1));
-	if (currentUnit->getArmor()->getSize() > 1)
+	Tile *tileAbove = _save->getAboveTile(tile);
+	if (currentUnit->isBigUnit())
 	{
 		originVoxel.x += 8;
 		originVoxel.y += 8;
 		originVoxel.z += 1; //topmost voxel
 	}
-	if (originVoxel.z >= (currentUnit->getPosition().z + 1)*24 && (!tileAbove || !tileAbove->hasNoFloor(0)))
+	if (originVoxel.z >= (pos.z + 1)*Position::TileZ && (!tileAbove || !tileAbove->hasNoFloor(0)))
 	{
-		while (originVoxel.z >= (currentUnit->getPosition().z + 1)*24)
+		while (originVoxel.z >= (pos.z + 1)*Position::TileZ)
 		{
 			originVoxel.z--;
 		}
@@ -1390,7 +1447,7 @@ int TileEngine::checkVoxelExposure(Position *originVoxel, Tile *tile, BattleUnit
 	int heightRange;
 
 	int unitRadius = otherUnit->getLoftemps(); //width == loft in default loftemps set
-	if (otherUnit->getArmor()->getSize() > 1)
+	if (otherUnit->isBigUnit())
 	{
 		unitRadius = 3;
 	}
@@ -1743,7 +1800,9 @@ void TileEngine::calculateFOV(Position position, int eventRadius, const bool upd
 	}
 	for (std::vector<BattleUnit*>::iterator i = _save->getUnits()->begin(); i != _save->getUnits()->end(); ++i)
 	{
-		if (Position::distance2dSq(position, (*i)->getPosition()) <= updateRadius) //could this unit have observed the event?
+		const auto posUnit = (*i)->getPosition();
+
+		if (Position::distance2dSq(position, posUnit) <= updateRadius) //could this unit have observed the event?
 		{
 			if (updateTiles)
 			{
@@ -2904,7 +2963,7 @@ int TileEngine::verticalBlockage(Tile *startTile, Tile *endTile, ItemDamageType 
 	int block = 0;
 
 	// safety check
-	if (startTile == 0 || endTile == 0) return 0;
+	if (startTile == 0 || endTile == 0) return 255;
 
 	auto startPos = startTile->getPosition();
 	auto endPos = endTile->getPosition();
@@ -2962,7 +3021,7 @@ int TileEngine::horizontalBlockage(Tile *startTile, Tile *endTile, ItemDamageTyp
 	const Position oneTileWest = Position(-1, 0, 0);
 
 	// safety check
-	if (startTile == 0 || endTile == 0) return 0;
+	if (startTile == 0 || endTile == 0) return 255;
 
 	auto startPos = startTile->getPosition();
 	auto endPos = endTile->getPosition();
@@ -3141,7 +3200,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 {
 	int blockage = 0;
 
-	if (tile == 0) return 0; // probably outside the map here
+	if (tile == 0) return 255; // probably outside the map here
 
 	MapData *mapData = tile->getMapData(part);
 	if (mapData)
@@ -3495,7 +3554,7 @@ int TileEngine::closeUfoDoors()
 	// prepare a list of tiles on fire/smoke & close any ufo doors
 	for (int i = 0; i < _save->getMapSizeXYZ(); ++i)
 	{
-		if (_save->getTile(i)->getUnit() && _save->getTile(i)->getUnit()->getArmor()->getSize() > 1)
+		if (_save->getTile(i)->getUnit() && _save->getTile(i)->getUnit()->isBigUnit())
 		{
 			BattleUnit *bu = _save->getTile(i)->getUnit();
 			Tile *tile = _save->getTile(i);
@@ -3531,49 +3590,23 @@ int TileEngine::calculateLineTile(Position origin, Position target, std::vector<
 		{
 			trajectory.push_back(point);
 
-			auto dir = -1;
-			auto difference = point - lastPoint;
-			auto result = false;
-			auto& cache = _blockVisibility[_save->getTileIndex(lastPoint)];
-			Pathfinding::vectorToDirection(difference, dir);
-			if (difference.z > 0)
-			{
-				if (dir != -1)
-				{
-					result = cache.blockDirUp & (1 << dir);
-				}
-				else
-				{
-					result = cache.blockUp;
-				}
-			}
-			else if (difference.z == 0)
-			{
-				result = cache.blockDir & (1 << dir);
+			const auto difference = point - lastPoint;
+			const auto dir = Pathfinding::vectorToDirection(difference);
+			const auto& cache = _blockVisibility[_save->getTileIndex(lastPoint)];
 
-				if (result && cache.bigWall & (1 << dir))
-				{
-					if (steps<2)
-					{
-						result = false;
-					}
-					else
-					{
-						bigWall = true;
-					}
-				}
-			}
-			else if (difference.z < 0)
+			auto result = getBlockDir(cache, dir, difference.z);
+			if (result && difference.z == 0 && getBigWallDir(cache, dir))
 			{
-				if (dir != -1)
+				if (steps<2)
 				{
-					result = cache.blockDirDown & (1 << dir);
+					result = false;
 				}
 				else
 				{
-					result = cache.blockDown;
+					bigWall = true;
 				}
 			}
+
 			steps++;
 			lastPoint = point;
 			return result;
@@ -3854,7 +3887,7 @@ VoxelType TileEngine::voxelCheck(Position voxel, BattleUnit *excludeUnit, bool e
 				int x = voxel.x%16;
 				int y = voxel.y%16;
 				int part = 0;
-				if (unit->getArmor()->getSize() > 1)
+				if (unit->isBigUnit())
 				{
 					tilepos = tile->getPosition();
 					part = tilepos.x - unitpos.x + (tilepos.y - unitpos.y)*2;
